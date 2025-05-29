@@ -68,7 +68,11 @@ def search_name(df, query, threshold=80, limit=10):
             'Remarks': row['remarks']
         })
 
-    return pd.DataFrame(results).sort_values(by='Score', ascending=False)
+    df_results = pd.DataFrame(results)
+    if not df_results.empty and 'Score' in df_results.columns:
+        df_results['Score'] = pd.to_numeric(df_results['Score'], errors='coerce').fillna(0).astype(int)
+        return df_results.sort_values(by='Score', ascending=False)
+    return df_results
 
 # Streamlit App UI
 st.set_page_config(page_title="SDN Fuzzy Search", layout="wide")
