@@ -7,8 +7,6 @@ import streamlit as st
 import os
 
 # Function to download and flatten SDN XML
-
-# Function to download and flatten SDN XML
 @st.cache_data(show_spinner=False)
 def download_and_flatten_sdn():
     url = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML"
@@ -134,10 +132,13 @@ if run_search and (uploaded_file or manual_name):
                 result_df = pd.concat(all_matches, ignore_index=True)
                 result_df['Score'] = pd.to_numeric(result_df['Score'], errors='coerce').fillna(0).astype(int)
                 st.success(f"✅ Found {len(result_df[result_df['Score'] > 0])} potential match(es).")
-                for name, group in result_df.groupby('Input Name'):
-                    st.markdown(f"### 🔎 Results for: `{name}`")
-                    st.dataframe(group.drop(columns=['Input Name']), use_container_width=True)
 
+                # Show top 5 matches
+                top5 = result_df.sort_values(by='Score', ascending=False).head(5)
+                st.subheader("Top 5 Matches")
+                st.dataframe(top5, use_container_width=True)
+
+                # Provide download button
                 csv = result_df.to_csv(index=False).encode('utf-8')
                 st.download_button("Download Matches as CSV", data=csv, file_name="sdn_matches.csv", mime="text/csv")
         except Exception as e:
