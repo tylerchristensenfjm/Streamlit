@@ -423,7 +423,7 @@ st.title("OFAC SDN Fuzzy Match Search")
 
 uploaded_file = st.file_uploader("Upload a CSV file with a 'Name' column", type="csv")
 manual_name = st.text_input("Or enter a single name to search (optional):", value="")
-threshold = st.slider("Match Threshold:", 60, 100, 85)
+threshold = st.slider("Name Match Accuracy:", 60, 100, 85)
 
 if uploaded_file or manual_name:
     try:
