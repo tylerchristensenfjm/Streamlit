@@ -74,7 +74,7 @@ def search_name(df, query, threshold=80, limit=10):
 
 # Streamlit App UI
 st.set_page_config(page_title="SDN Fuzzy Search", layout="wide")
-st.title("🕵️‍♂️ OFAC SDN Fuzzy Match Search")
+st.title("OFAC SDN Fuzzy Match Search")
 
 uploaded_file = st.file_uploader("Upload a CSV file with a 'Name' column", type="csv")
 manual_name = st.text_input("Or enter a single name to search (optional):", value="")
@@ -131,7 +131,7 @@ if run_search and (uploaded_file or manual_name):
             if all_matches:
                 result_df = pd.concat(all_matches, ignore_index=True)
                 result_df['Score'] = pd.to_numeric(result_df['Score'], errors='coerce').fillna(0).astype(int)
-                st.success(f"✅ Found {len(result_df[result_df['Score'] > 0])} potential match(es).")
+                st.success(f"Found {len(result_df[result_df['Score'] > 0])} potential match(es).")
 
                 # Show top 5 matches
                 top5 = result_df.sort_values(by='Score', ascending=False).head(5)
@@ -142,4 +142,4 @@ if run_search and (uploaded_file or manual_name):
                 csv = result_df.to_csv(index=False).encode('utf-8')
                 st.download_button("Download Matches as CSV", data=csv, file_name="sdn_matches.csv", mime="text/csv")
         except Exception as e:
-            st.error(f"❌ Failed to process input: {e}")
+            st.error(f"Failed to process input: {e}")
