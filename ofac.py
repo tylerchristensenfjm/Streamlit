@@ -2,8 +2,10 @@ import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
 from rapidfuzz import fuzz
+from rapidfuzz import process
 import streamlit as st
 import os
+
 # Function to download and flatten SDN XML
 @st.cache_data(show_spinner=False)
 def download_and_flatten_sdn():
@@ -40,7 +42,7 @@ def download_and_flatten_sdn():
         })
     return pd.DataFrame(records)
 
-from rapidfuzz import process
+
 
 def search_name(df, query, threshold=80, limit=10):
     matches = process.extract(
@@ -87,7 +89,11 @@ if run_search and (uploaded_file or manual_name):
                 if 'Name' not in df_input.columns:
                     st.error("CSV must contain a 'Name' column.")
                 else:
-                    for name in df_input['Name'].dropna():
+                    progress_text = "🔍 Processing names..."
+                    my_bar = st.progress(0, text=progress_text)
+                    total_names = len(df_input['Name'].dropna())
+                    for i, name in enumerate(df_input['Name'].dropna(), start=1):
+                        my_bar.progress(i / total_names, text=f"Processing: {name} ({i}/{total_names})")
                         matches = search_name(df_sdn, name, threshold)
                         if matches.empty:
                             matches = pd.DataFrame([{
@@ -123,7 +129,9 @@ if run_search and (uploaded_file or manual_name):
                 result_df = pd.concat(all_matches, ignore_index=True)
                 result_df['Score'] = pd.to_numeric(result_df['Score'], errors='coerce').fillna(0).astype(int)
                 st.success(f"✅ Found {len(result_df[result_df['Score'] > 0])} potential match(es).")
-                st.dataframe(result_df)
+                for name, group in result_df.groupby('Input Name'):
+                    st.markdown(f"### 🔎 Results for: `{name}`")
+                    st.dataframe(group.drop(columns=['Input Name']), use_container_width=True)
 
                 csv = result_df.to_csv(index=False).encode('utf-8')
                 st.download_button("Download Matches as CSV", data=csv, file_name="sdn_matches.csv", mime="text/csv")
