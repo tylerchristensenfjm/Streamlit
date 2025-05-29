@@ -361,6 +361,8 @@ import os
 
 
 # Function to download and flatten SDN XML
+
+# Function to download and flatten SDN XML
 @st.cache_data(show_spinner=False)
 def download_and_flatten_sdn():
     url = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML"
@@ -396,34 +398,40 @@ def download_and_flatten_sdn():
         })
     return pd.DataFrame(records)
 
-def search_name(df, query, threshold=80):
+from rapidfuzz import process
+
+def search_name(df, query, threshold=80, limit=10):
+    matches = process.extract(
+        query,
+        df['searchable_blob'],
+        scorer=fuzz.partial_ratio,
+        score_cutoff=threshold,
+        limit=limit
+    )
+
     results = []
-    query_lower = query.lower()
-    for _, row in df.iterrows():
-        score = fuzz.partial_ratio(query_lower, row['searchable_blob'])
-        if score >= threshold:
-            results.append({
-                'Input Name': query,
-                'Matched Text': query,
-                'Score': score,
-                'Entity Name': row['name'],
-                'AKAs': '; '.join(row['akas']) if isinstance(row['akas'], list) else '',
-                'Type': row['sdnType'],
-                'Remarks': row['remarks']
-            })
-    df_results = pd.DataFrame(results)
-    if not df_results.empty and 'Score' in df_results.columns:
-        df_results['Score'] = pd.to_numeric(df_results['Score'], errors='coerce').fillna(0).astype(int)
-        return df_results.sort_values(by='Score', ascending=False)
+    for match_text, score, idx in matches:
+        row = df.iloc[idx]
+        results.append({
+            'Input Name': query,
+            'Matched Text': match_text,
+            'Score': score,
+            'Entity Name': row['name'],
+            'AKAs': '; '.join(row['akas']) if isinstance(row['akas'], list) else '',
+            'Type': row['sdnType'],
+            'Remarks': row['remarks']
+        })
+
+    return pd.DataFrame(results).sort_values(by='Score', ascending=False)
     return df_results
 
 # Streamlit App UI
 st.set_page_config(page_title="SDN Fuzzy Search", layout="wide")
-st.title("OFAC SDN Fuzzy Match Search")
+st.title("🕵️‍♂️ OFAC SDN Fuzzy Match Search")
 
 uploaded_file = st.file_uploader("Upload a CSV file with a 'Name' column", type="csv")
 manual_name = st.text_input("Or enter a single name to search (optional):", value="")
-threshold = st.slider("Name Match Accuracy:", 60, 100, 85)
+threshold = st.slider("Close-to Match Threshold:", 60, 100, 85)
 
 if uploaded_file or manual_name:
     try:
