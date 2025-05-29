@@ -7,6 +7,8 @@ import streamlit as st
 import os
 
 # Function to download and flatten SDN XML
+
+# Function to download and flatten SDN XML
 @st.cache_data(show_spinner=False)
 def download_and_flatten_sdn():
     url = "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML"
@@ -42,7 +44,7 @@ def download_and_flatten_sdn():
         })
     return pd.DataFrame(records)
 
-
+from rapidfuzz import process
 
 def search_name(df, query, threshold=80, limit=10):
     matches = process.extract(
@@ -67,7 +69,6 @@ def search_name(df, query, threshold=80, limit=10):
         })
 
     return pd.DataFrame(results).sort_values(by='Score', ascending=False)
-    return df_results
 
 # Streamlit App UI
 st.set_page_config(page_title="SDN Fuzzy Search", layout="wide")
@@ -75,7 +76,7 @@ st.title("🕵️‍♂️ OFAC SDN Fuzzy Match Search")
 
 uploaded_file = st.file_uploader("Upload a CSV file with a 'Name' column", type="csv")
 manual_name = st.text_input("Or enter a single name to search (optional):", value="")
-threshold = st.slider("Name Match Accuracy:", 60, 100, 85)
+threshold = st.slider("Close-to Match Threshold:", 60, 100, 85)
 
 run_search = st.button("Start Search")
 
