@@ -1,7 +1,5 @@
 rapidfuzz
 streamlit
-pandas
 requests
-os
 fastmcp
 pandas
