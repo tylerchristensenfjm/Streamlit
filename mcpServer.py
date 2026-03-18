@@ -7,7 +7,6 @@ import pandas as pd
 import numpy as np
 from functools import lru_cache
 from starlette.responses import PlainTextResponse
-from starlette.routing import Route
 
 # Initialize FastMCP server
 mcp = FastMCP("HighBond-Connector")
@@ -20,13 +19,13 @@ OPENAI_APPS_CHALLENGE_TOKEN = os.getenv("OPENAI_APPS_CHALLENGE_TOKEN")
 
 HIGHBOND_API_ROOT = "https://apis-us.highbond.com"
 
-if not HIGHBOND_TOKEN:
-    raise ValueError("HIGHBOND_TOKEN environment variable is required")
-HEADERS = {
-    "Authorization": f"Bearer {HIGHBOND_TOKEN}",
-    "Content-Type": "application/json",
-}
-
+def get_headers() -> dict:
+    if not HIGHBOND_TOKEN:
+        raise ValueError("HIGHBOND_TOKEN environment variable is required")
+    return {
+        "Authorization": f"Bearer {HIGHBOND_TOKEN}",
+        "Content-Type": "application/json",
+    }
 ISSUE_FIELDS = (
     "fields[issues]="
     "created_at,updated_at,published,project,entities,title,description,"
@@ -48,7 +47,7 @@ def fetch_all_pages(url: str) -> list[dict]:
     rows = []
 
     while url:
-        response = r.get(url, headers=HEADERS, timeout=60)
+        response = r.get(url, headers=get_headers(), timeout=60)
         response.raise_for_status()
         payload = response.json()
 
@@ -473,12 +472,11 @@ async def openai_apps_challenge(request):
         return PlainTextResponse("Challenge token not configured", status_code=500)
     return PlainTextResponse(OPENAI_APPS_CHALLENGE_TOKEN)
 
-app = mcp.http_app(
-    path="/mcp/",
-    routes=[
-        Route("/.well-known/openai-apps-challenge", openai_apps_challenge),
-    ],
-)
+@mcp.custom_route("/.well-known/openai-apps-challenge", methods=["GET"])
+async def openai_apps_challenge(request):
+    if not OPENAI_APPS_CHALLENGE_TOKEN:
+        return PlainTextResponse("Challenge token not configured", status_code=500)
+    return PlainTextResponse(OPENAI_APPS_CHALLENGE_TOKEN)
 
 if __name__ == "__main__":
     mcp.run(transport="http")
