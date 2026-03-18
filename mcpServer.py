@@ -17,10 +17,8 @@ HIGHBOND_BASE_URL = os.getenv("HIGHBOND_BASE_URL", "https://apis-us.highbond.com
 
 HIGHBOND_API_ROOT = "https://apis-us.highbond.com"
 
-
 if not HIGHBOND_TOKEN:
     raise ValueError("HIGHBOND_TOKEN environment variable is required")
-
 HEADERS = {
     "Authorization": f"Bearer {HIGHBOND_TOKEN}",
     "Content-Type": "application/json",
@@ -28,9 +26,10 @@ HEADERS = {
 
 ISSUE_FIELDS = (
     "fields[issues]="
-    "published,project,entities,title,deficiency_type,severity,"
+    "created_at,updated_at,published,project,entities,title,description,"
+    "owner,executive_owner,project_owner,deficiency_type,severity,"
     "remediation_status,remediation_plan,remediation_date,"
-    "actual_remediation_date,closed"
+    "actual_remediation_date,closed,recommendation"
 )
 
 
@@ -87,6 +86,8 @@ def fetch_issues_df() -> pd.DataFrame:
                 "severity": attr.get("severity"),
                 "project_id": project_id,
                 "entities_id": entity_ids,
+                "created_at": attr.get("created_at"),
+                "updated_at": attr.get("updated_at"),
                 "published": attr.get("published"),
                 "issue_closed": attr.get("closed"),
                 "remediation_status": attr.get("remediation_status"),
@@ -133,11 +134,19 @@ def build_merged_df() -> pd.DataFrame:
     projects_df = fetch_projects_df()
 
     df = pd.merge(issues_df, projects_df, on="project_id", how="inner")
+
+    # Convert date fields
+    for col in ["created_at", "updated_at", "published", "remediation_date", "actual_remediation_date"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+
     df["rem_has_date"] = df["remediation_date"].notna().astype(int)
 
+    # Business filters
     df = df[df["project_id"] != "288433"]
-    df = df[~df["project_name"].str.lower().str.startswith("tab", na=False)]
+    df = df[~df["project_name"].fillna("").str.lower().str.startswith("tab", na=False)]
 
+    # Normalize issue status
     df["issue_closed"] = np.where(df["issue_closed"] == True, "Closed", "Open")
 
     return df
@@ -152,8 +161,45 @@ def get_df() -> pd.DataFrame:
     return get_cached_df().copy()
 
 
+def sort_df(
+    df: pd.DataFrame,
+    sort_by: str = "created_at",
+    sort_desc: bool = True,
+) -> pd.DataFrame:
+    allowed_sort_cols = {
+        "created_at",
+        "updated_at",
+        "published",
+        "remediation_date",
+        "actual_remediation_date",
+        "issue_title",
+        "project_name",
+        "severity",
+        "issue_status",
+        "remediation_status",
+    }
+
+    normalized_sort_by = "issue_closed" if sort_by == "issue_status" else sort_by
+
+    if normalized_sort_by not in df.columns or sort_by not in allowed_sort_cols:
+        normalized_sort_by = "created_at"
+
+    return df.sort_values(
+        by=normalized_sort_by,
+        ascending=not sort_desc,
+        na_position="last",
+        kind="stable",
+    )
+
+
 def serialize_df(df: pd.DataFrame, max_rows: int = 50) -> dict:
     out = df.copy()
+
+    # Convert timestamps to strings for cleaner MCP responses
+    datetime_cols = out.select_dtypes(include=["datetime64[ns]", "datetime64[ns, UTC]"]).columns
+    for col in datetime_cols:
+        out[col] = out[col].astype(str)
+
     out = out.where(pd.notna(out), None)
 
     return {
@@ -190,33 +236,30 @@ def search_issues(
     severity: Optional[str] = None,
     issue_type: Optional[str] = None,
     has_remediation_date: Optional[bool] = None,
+    sort_by: str = "created_at",
+    sort_desc: bool = True,
     max_rows: int = 500,
 ) -> dict:
     """
     Search issues using business-friendly filters.
 
-    Parameters:
-    - title_contains: text to search in the issue title
-    - project_name: partial project name match
-
-    - issue_owner: text to search in the issue owner
-    - issue_description: text to search in the issue owner
-    - issue_executive_owner: text to search in the issue owner
-    - issue_project_owner: text to search in the issue owner
-
-    - issue_status: Open or Closed
-    - remediation_status: partial or exact remediation status
-    - severity: severity level
-    - issue_type: deficiency / issue type
-    - has_remediation_date: True for issues with a remediation date, False for missing
+    sort_by options:
+    - created_at
+    - updated_at
+    - published
+    - remediation_date
+    - actual_remediation_date
+    - issue_title
+    - project_name
+    - severity
+    - issue_status
+    - remediation_status
     """
     df = get_df()
 
     if title_contains:
         df = df[df["issue_title"].fillna("").str.contains(title_contains, case=False, na=False)]
 
-    
-    
     if issue_owner:
         df = df[df["issue_owner"].fillna("").str.contains(issue_owner, case=False, na=False)]
 
@@ -224,13 +267,19 @@ def search_issues(
         df = df[df["issue_description"].fillna("").str.contains(issue_description, case=False, na=False)]
 
     if issue_executive_owner:
-        df = df[df["issue_executive_owner"].fillna("").str.contains(issue_executive_owner, case=False, na=False)]
+        df = df[
+            df["issue_executive_owner"].fillna("").str.contains(
+                issue_executive_owner, case=False, na=False
+            )
+        ]
 
     if issue_project_owner:
-        df = df[df["issue_project_owner"].fillna("").str.contains(issue_project_owner, case=False, na=False)]
-    
-    
-    
+        df = df[
+            df["issue_project_owner"].fillna("").str.contains(
+                issue_project_owner, case=False, na=False
+            )
+        ]
+
     if project_name:
         df = df[df["project_name"].fillna("").str.contains(project_name, case=False, na=False)]
 
@@ -254,6 +303,28 @@ def search_issues(
         else:
             df = df[df["remediation_date"].isna()]
 
+    df = sort_df(df, sort_by=sort_by, sort_desc=sort_desc)
+
+    return serialize_df(df, max_rows=max_rows)
+
+
+@mcp.tool
+def get_recent_issues(max_rows: int = 5) -> dict:
+    """
+    Return the most recently created issues.
+    """
+    df = get_df()
+    df = sort_df(df, sort_by="created_at", sort_desc=True)
+    return serialize_df(df, max_rows=max_rows)
+
+
+@mcp.tool
+def get_recently_updated_issues(max_rows: int = 5) -> dict:
+    """
+    Return the most recently updated issues.
+    """
+    df = get_df()
+    df = sort_df(df, sort_by="updated_at", sort_desc=True)
     return serialize_df(df, max_rows=max_rows)
 
 
@@ -286,6 +357,8 @@ def get_issue_summary() -> dict:
 def get_overdue_issues(
     project_name: Optional[str] = None,
     severity: Optional[str] = None,
+    sort_by: str = "remediation_date",
+    sort_desc: bool = False,
     max_rows: int = 50,
 ) -> dict:
     """
@@ -309,6 +382,8 @@ def get_overdue_issues(
     if severity:
         df = df[df["severity"].fillna("").str.contains(severity, case=False, na=False)]
 
+    df = sort_df(df, sort_by=sort_by, sort_desc=sort_desc)
+
     return serialize_df(df, max_rows=max_rows)
 
 
@@ -316,6 +391,8 @@ def get_overdue_issues(
 def get_issues_missing_remediation_date(
     project_name: Optional[str] = None,
     issue_status: Optional[str] = None,
+    sort_by: str = "created_at",
+    sort_desc: bool = True,
     max_rows: int = 50,
 ) -> dict:
     """
@@ -329,6 +406,8 @@ def get_issues_missing_remediation_date(
 
     if issue_status:
         df = df[df["issue_closed"].fillna("").str.lower() == issue_status.lower()]
+
+    df = sort_df(df, sort_by=sort_by, sort_desc=sort_desc)
 
     return serialize_df(df, max_rows=max_rows)
 
@@ -353,6 +432,8 @@ def get_project_summary(
             open_issues=("issue_closed", lambda s: int((s == "Open").sum())),
             closed_issues=("issue_closed", lambda s: int((s == "Closed").sum())),
             missing_remediation_date=("remediation_date", lambda s: int(s.isna().sum())),
+            latest_created_at=("created_at", "max"),
+            latest_updated_at=("updated_at", "max"),
         )
         .reset_index()
         .sort_values(["open_issues", "total_issues"], ascending=[False, False])
@@ -369,11 +450,7 @@ def list_filter_values() -> dict:
     df = get_df()
 
     def clean_unique(series: pd.Series) -> list[str]:
-        vals = (
-            series.dropna()
-            .astype(str)
-            .str.strip()
-        )
+        vals = series.dropna().astype(str).str.strip()
         vals = vals[vals != ""]
         return sorted(vals.unique().tolist())
 
@@ -382,6 +459,9 @@ def list_filter_values() -> dict:
         "severity_values": clean_unique(df["severity"]),
         "issue_type_values": clean_unique(df["issue_type"]),
         "remediation_status_values": clean_unique(df["remediation_status"]),
+        "issue_owner_values": clean_unique(df["issue_owner"])[:100],
+        "issue_executive_owner_values": clean_unique(df["issue_executive_owner"])[:100],
+        "issue_project_owner_values": clean_unique(df["issue_project_owner"])[:100],
         "sample_project_names": clean_unique(df["project_name"])[:100],
     }
 
