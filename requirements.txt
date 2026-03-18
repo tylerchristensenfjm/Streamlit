@@ -5,3 +5,4 @@ fastmcp
 pandas
 numpy
 typing
+starlette
