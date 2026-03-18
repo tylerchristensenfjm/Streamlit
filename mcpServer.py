@@ -5,6 +5,7 @@ from typing import Optional
 import requests as r
 import pandas as pd
 import numpy as np
+from functools import lru_cache
 
 # Initialize FastMCP server
 mcp = FastMCP("HighBond-Connector")
@@ -18,7 +19,7 @@ HIGHBOND_API_ROOT = "https://apis-us.highbond.com"
 
 
 if not HIGHBOND_TOKEN:
-    raise ValueError("Missing HIGHBOND_TOKEN environment variable")
+    raise ValueError("HIGHBOND_TOKEN environment variable is required")
 
 HEADERS = {
     "Authorization": f"Bearer {HIGHBOND_TOKEN}",
@@ -42,27 +43,25 @@ def normalize_next_url(url: Optional[str]) -> Optional[str]:
 
 
 def fetch_all_pages(url: str) -> list[dict]:
-    all_rows = []
+    rows = []
 
     while url:
         response = r.get(url, headers=HEADERS, timeout=60)
         response.raise_for_status()
         payload = response.json()
 
-        all_rows.extend(payload.get("data", []))
+        rows.extend(payload.get("data", []))
         url = normalize_next_url(payload.get("links", {}).get("next"))
 
-    return all_rows
+    return rows
 
 
-def fetch_issues() -> pd.DataFrame:
-    url = f"{HIGHBOND_BASE_URL}/orgs/{HIGHBOND_ORG_ID}/issues/?{ISSUE_FIELDS}"
-    raw_issues = fetch_all_pages(url)
+def fetch_issues_df() -> pd.DataFrame:
+    issue_url = f"{HIGHBOND_BASE_URL}/orgs/{HIGHBOND_ORG_ID}/issues/?{ISSUE_FIELDS}"
+    raw = fetch_all_pages(issue_url)
 
     rows = []
-    for item in raw_issues:
-        issue_id = item.get("id")
-
+    for item in raw:
         relationships = item.get("relationships", {})
         project = relationships.get("project", {})
         entities = relationships.get("entities", {})
@@ -72,27 +71,28 @@ def fetch_issues() -> pd.DataFrame:
         entities_data = entities.get("data", [])
         entity_ids = []
         if isinstance(entities_data, list):
-            entity_ids = [e.get("id") for e in entities_data if e.get("id")]
+            entity_ids = [x.get("id") for x in entities_data if x.get("id")]
 
-        attributes = item.get("attributes", {})
+        attr = item.get("attributes", {})
 
         rows.append(
             {
-                "issue_id": issue_id,
-                "issue_title": attributes.get("title"),
-                "issue_type": attributes.get("deficiency_type"),
-                "severity": attributes.get("severity"),
+                "issue_id": item.get("id"),
+                "issue_title": attr.get("title"),
+                "issue_type": attr.get("deficiency_type"),
+                "severity": attr.get("severity"),
                 "project_id": project_id,
                 "entities_id": entity_ids,
-                "published": attributes.get("published"),
-                "issue_closed": attributes.get("closed"),
-                "remediation_status": attributes.get("remediation_status"),
-                "remediation_date": attributes.get("remediation_date"),
-                "actual_remediation_date": attributes.get("actual_remediation_date"),
-                "remediation_plan": attributes.get("remediation_plan"),
+                "published": attr.get("published"),
+                "issue_closed": attr.get("closed"),
+                "remediation_status": attr.get("remediation_status"),
+                "remediation_date": attr.get("remediation_date"),
+                "actual_remediation_date": attr.get("actual_remediation_date"),
+                "remediation_plan": attr.get("remediation_plan"),
+                "recommendation": attr.get("recommendation"),
                 "issue_url": (
                     f"activity-centers-api.highbond.com/redirect"
-                    f"?target=issue&subdomain=fjmgt&project_id={project_id}&issue_id={issue_id}"
+                    f"?target=issue&subdomain=fjmgt&project_id={project_id}&issue_id={item.get('id')}"
                 ),
             }
         )
@@ -100,24 +100,24 @@ def fetch_issues() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def fetch_projects() -> pd.DataFrame:
-    url = f"{HIGHBOND_BASE_URL}/orgs/{HIGHBOND_ORG_ID}/projects"
-    raw_projects = fetch_all_pages(url)
+def fetch_projects_df() -> pd.DataFrame:
+    project_url = f"{HIGHBOND_BASE_URL}/orgs/{HIGHBOND_ORG_ID}/projects"
+    raw = fetch_all_pages(project_url)
 
     rows = []
-    for item in raw_projects:
-        attributes = item.get("attributes", {})
+    for item in raw:
+        attr = item.get("attributes", {})
 
         rows.append(
             {
                 "project_id": item.get("id"),
-                "project_name": attributes.get("name"),
+                "project_name": attr.get("name"),
                 "project_url": item.get("links", {}).get("ui"),
-                "project_state": attributes.get("state"),
-                "project_status": attributes.get("status"),
-                "project_progress": attributes.get("progress"),
-                "project_budget": attributes.get("budget"),
-                "project_time_spent": attributes.get("time_spent"),
+                "project_state": attr.get("state"),
+                "project_status": attr.get("status"),
+                "project_progress": attr.get("progress"),
+                "project_budget": attr.get("budget"),
+                "project_time_spent": attr.get("time_spent"),
             }
         )
 
@@ -125,108 +125,234 @@ def fetch_projects() -> pd.DataFrame:
 
 
 def build_merged_df() -> pd.DataFrame:
-    issues_df = fetch_issues()
-    projects_df = fetch_projects()
+    issues_df = fetch_issues_df()
+    projects_df = fetch_projects_df()
 
-    merged_df = pd.merge(issues_df, projects_df, on="project_id", how="inner")
+    df = pd.merge(issues_df, projects_df, on="project_id", how="inner")
+    df["rem_has_date"] = df["remediation_date"].notna().astype(int)
 
-    merged_df["rem_has_date"] = merged_df["remediation_date"].notna().astype(int)
-    merged_df = merged_df[merged_df["project_id"] != "288433"]
-    merged_df = merged_df[
-        ~merged_df["project_name"].str.lower().str.startswith("tab", na=False)
-    ]
-    merged_df["issue_closed"] = np.where(
-        merged_df["issue_closed"] == True, "Closed", "Open"
-    )
+    df = df[df["project_id"] != "288433"]
+    df = df[~df["project_name"].str.lower().str.startswith("tab", na=False)]
 
-    return merged_df
+    df["issue_closed"] = np.where(df["issue_closed"] == True, "Closed", "Open")
+
+    return df
 
 
-def df_for_ai(df: pd.DataFrame, max_rows: int = 100) -> dict:
+@lru_cache(maxsize=1)
+def get_cached_df() -> pd.DataFrame:
+    return build_merged_df()
+
+
+def get_df() -> pd.DataFrame:
+    return get_cached_df().copy()
+
+
+def serialize_df(df: pd.DataFrame, max_rows: int = 50) -> dict:
     out = df.copy()
-
-    # convert lists/dates/nan to model-friendly values
-    for col in out.columns:
-        if pd.api.types.is_datetime64_any_dtype(out[col]):
-            out[col] = out[col].astype(str)
-
     out = out.where(pd.notna(out), None)
 
     return {
-        "row_count": len(out),
+        "row_count": int(len(out)),
         "columns": list(out.columns),
         "data": out.head(max_rows).to_dict(orient="records"),
     }
 
 
 @mcp.tool
-def get_issue_summary() -> dict:
+def refresh_data() -> dict:
     """
-    Return a compact summary of issues and projects.
+    Refresh the HighBond issues dataframe from the API.
     """
-    df = build_merged_df()
-
+    get_cached_df.cache_clear()
+    df = get_df()
     return {
-        "total_rows": int(len(df)),
-        "open_issues": int((df["issue_closed"] == "Open").sum()),
-        "closed_issues": int((df["issue_closed"] == "Closed").sum()),
-        "projects": int(df["project_id"].nunique()),
-        "remediation_status_counts": df["remediation_status"]
-        .fillna("Missing")
-        .value_counts()
-        .to_dict(),
+        "status": "ok",
+        "rows": int(len(df)),
+        "columns": list(df.columns),
     }
 
 
 @mcp.tool
-def query_issues(
+def search_issues(
+    title_contains: Optional[str] = None,
     project_name: Optional[str] = None,
     issue_status: Optional[str] = None,
     remediation_status: Optional[str] = None,
+    severity: Optional[str] = None,
+    issue_type: Optional[str] = None,
+    has_remediation_date: Optional[bool] = None,
     max_rows: int = 50,
 ) -> dict:
     """
-    Return filtered issue rows in AI-friendly format.
+    Search issues using business-friendly filters.
+
+    Parameters:
+    - title_contains: text to search in the issue title
+    - project_name: partial project name match
+    - issue_status: Open or Closed
+    - remediation_status: partial or exact remediation status
+    - severity: severity level
+    - issue_type: deficiency / issue type
+    - has_remediation_date: True for issues with a remediation date, False for missing
     """
-    df = build_merged_df()
+    df = get_df()
+
+    if title_contains:
+        df = df[df["issue_title"].fillna("").str.contains(title_contains, case=False, na=False)]
 
     if project_name:
-        df = df[df["project_name"].str.contains(project_name, case=False, na=False)]
+        df = df[df["project_name"].fillna("").str.contains(project_name, case=False, na=False)]
 
     if issue_status:
-        df = df[df["issue_closed"].str.lower() == issue_status.lower()]
+        df = df[df["issue_closed"].fillna("").str.lower() == issue_status.lower()]
 
     if remediation_status:
         df = df[
-            df["remediation_status"].fillna("").str.lower()
-            == remediation_status.lower()
+            df["remediation_status"].fillna("").str.contains(remediation_status, case=False, na=False)
         ]
 
-    return df_for_ai(df, max_rows=max_rows)
+    if severity:
+        df = df[df["severity"].fillna("").str.contains(severity, case=False, na=False)]
+
+    if issue_type:
+        df = df[df["issue_type"].fillna("").str.contains(issue_type, case=False, na=False)]
+
+    if has_remediation_date is not None:
+        if has_remediation_date:
+            df = df[df["remediation_date"].notna()]
+        else:
+            df = df[df["remediation_date"].isna()]
+
+    return serialize_df(df, max_rows=max_rows)
 
 
 @mcp.tool
-def get_project_issues(project_id: str, max_rows: int = 100) -> dict:
+def get_issue_summary() -> dict:
     """
-    Return issues for a single project.
+    Return overall counts for issues.
     """
-    df = build_merged_df()
-    df = df[df["project_id"] == project_id]
+    df = get_df()
+    today = pd.Timestamp.today().normalize()
+    rem_dates = pd.to_datetime(df["remediation_date"], errors="coerce")
 
-    return df_for_ai(df, max_rows=max_rows)
-
-
-@mcp.tool
-def get_dataframe_schema() -> dict:
-    """
-    Return columns and dtypes so the model knows what it can query.
-    """
-    df = build_merged_df()
+    overdue_mask = (
+        (df["issue_closed"] == "Open")
+        & rem_dates.notna()
+        & (rem_dates < today)
+    )
 
     return {
-        "columns": list(df.columns),
-        "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()},
-        "sample_rows": df_for_ai(df, max_rows=5)["data"],
+        "total_issues": int(len(df)),
+        "open_issues": int((df["issue_closed"] == "Open").sum()),
+        "closed_issues": int((df["issue_closed"] == "Closed").sum()),
+        "high_severity_issues": int(df["severity"].fillna("").str.contains("high", case=False).sum()),
+        "issues_missing_remediation_date": int(df["remediation_date"].isna().sum()),
+        "overdue_open_issues": int(overdue_mask.sum()),
+    }
+
+
+@mcp.tool
+def get_overdue_issues(
+    project_name: Optional[str] = None,
+    severity: Optional[str] = None,
+    max_rows: int = 50,
+) -> dict:
+    """
+    Return open issues with remediation dates earlier than today.
+    """
+    df = get_df()
+
+    rem_dates = pd.to_datetime(df["remediation_date"], errors="coerce")
+    today = pd.Timestamp.today().normalize()
+
+    mask = (
+        (df["issue_closed"] == "Open")
+        & rem_dates.notna()
+        & (rem_dates < today)
+    )
+    df = df[mask].copy()
+
+    if project_name:
+        df = df[df["project_name"].fillna("").str.contains(project_name, case=False, na=False)]
+
+    if severity:
+        df = df[df["severity"].fillna("").str.contains(severity, case=False, na=False)]
+
+    return serialize_df(df, max_rows=max_rows)
+
+
+@mcp.tool
+def get_issues_missing_remediation_date(
+    project_name: Optional[str] = None,
+    issue_status: Optional[str] = None,
+    max_rows: int = 50,
+) -> dict:
+    """
+    Return issues where remediation date is missing.
+    """
+    df = get_df()
+    df = df[df["remediation_date"].isna()].copy()
+
+    if project_name:
+        df = df[df["project_name"].fillna("").str.contains(project_name, case=False, na=False)]
+
+    if issue_status:
+        df = df[df["issue_closed"].fillna("").str.lower() == issue_status.lower()]
+
+    return serialize_df(df, max_rows=max_rows)
+
+
+@mcp.tool
+def get_project_summary(
+    project_name: Optional[str] = None,
+    max_rows: int = 100,
+) -> dict:
+    """
+    Return issue counts grouped by project name.
+    """
+    df = get_df()
+
+    if project_name:
+        df = df[df["project_name"].fillna("").str.contains(project_name, case=False, na=False)]
+
+    summary = (
+        df.groupby("project_name", dropna=False)
+        .agg(
+            total_issues=("issue_title", "count"),
+            open_issues=("issue_closed", lambda s: int((s == "Open").sum())),
+            closed_issues=("issue_closed", lambda s: int((s == "Closed").sum())),
+            missing_remediation_date=("remediation_date", lambda s: int(s.isna().sum())),
+        )
+        .reset_index()
+        .sort_values(["open_issues", "total_issues"], ascending=[False, False])
+    )
+
+    return serialize_df(summary, max_rows=max_rows)
+
+
+@mcp.tool
+def list_filter_values() -> dict:
+    """
+    Return common values the assistant can use for filtering.
+    """
+    df = get_df()
+
+    def clean_unique(series: pd.Series) -> list[str]:
+        vals = (
+            series.dropna()
+            .astype(str)
+            .str.strip()
+        )
+        vals = vals[vals != ""]
+        return sorted(vals.unique().tolist())
+
+    return {
+        "issue_status_values": clean_unique(df["issue_closed"]),
+        "severity_values": clean_unique(df["severity"]),
+        "issue_type_values": clean_unique(df["issue_type"]),
+        "remediation_status_values": clean_unique(df["remediation_status"]),
+        "sample_project_names": clean_unique(df["project_name"])[:100],
     }
 
 
