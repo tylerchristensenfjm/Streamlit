@@ -6,6 +6,8 @@ import requests as r
 import pandas as pd
 import numpy as np
 from functools import lru_cache
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
 
 # Initialize FastMCP server
 mcp = FastMCP("HighBond-Connector")
@@ -14,6 +16,7 @@ mcp = FastMCP("HighBond-Connector")
 HIGHBOND_TOKEN = os.getenv("HIGHBOND_TOKEN")
 HIGHBOND_ORG_ID = os.getenv("HIGHBOND_ORG_ID")
 HIGHBOND_BASE_URL = os.getenv("HIGHBOND_BASE_URL", "https://apis-us.highbond.com/v1")
+OPENAI_APPS_CHALLENGE_TOKEN = os.getenv("OPENAI_APPS_CHALLENGE_TOKEN")
 
 HIGHBOND_API_ROOT = "https://apis-us.highbond.com"
 
@@ -465,6 +468,19 @@ def list_filter_values() -> dict:
         "sample_project_names": clean_unique(df["project_name"])[:100],
     }
 
+async def openai_apps_challenge(request):
+    if not OPENAI_APPS_CHALLENGE_TOKEN:
+        return PlainTextResponse("Challenge token not configured", status_code=500)
+    return PlainTextResponse(OPENAI_APPS_CHALLENGE_TOKEN)
+
+app = mcp.http_app(
+    path="/mcp/",
+    routes=[
+        Route("/.well-known/openai-apps-challenge", openai_apps_challenge),
+    ],
+)
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="http")
+
+
