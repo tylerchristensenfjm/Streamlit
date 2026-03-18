@@ -79,6 +79,10 @@ def fetch_issues_df() -> pd.DataFrame:
             {
                 "issue_id": item.get("id"),
                 "issue_title": attr.get("title"),
+                "issue_description": attr.get("description"),
+                "issue_owner": attr.get("owner"),
+                "issue_executive_owner": attr.get("executive_owner"),
+                "issue_project_owner": attr.get("project_owner"),
                 "issue_type": attr.get("deficiency_type"),
                 "severity": attr.get("severity"),
                 "project_id": project_id,
@@ -178,11 +182,15 @@ def search_issues(
     title_contains: Optional[str] = None,
     project_name: Optional[str] = None,
     issue_status: Optional[str] = None,
+    issue_owner: Optional[str] = None,
+    issue_description: Optional[str] = None,
+    issue_executive_owner: Optional[str] = None,
+    issue_project_owner: Optional[str] = None,
     remediation_status: Optional[str] = None,
     severity: Optional[str] = None,
     issue_type: Optional[str] = None,
     has_remediation_date: Optional[bool] = None,
-    max_rows: int = 50,
+    max_rows: int = 500,
 ) -> dict:
     """
     Search issues using business-friendly filters.
@@ -190,6 +198,12 @@ def search_issues(
     Parameters:
     - title_contains: text to search in the issue title
     - project_name: partial project name match
+
+    - issue_owner: text to search in the issue owner
+    - issue_description: text to search in the issue owner
+    - issue_executive_owner: text to search in the issue owner
+    - issue_project_owner: text to search in the issue owner
+
     - issue_status: Open or Closed
     - remediation_status: partial or exact remediation status
     - severity: severity level
@@ -201,6 +215,22 @@ def search_issues(
     if title_contains:
         df = df[df["issue_title"].fillna("").str.contains(title_contains, case=False, na=False)]
 
+    
+    
+    if issue_owner:
+        df = df[df["issue_owner"].fillna("").str.contains(issue_owner, case=False, na=False)]
+
+    if issue_description:
+        df = df[df["issue_description"].fillna("").str.contains(issue_description, case=False, na=False)]
+
+    if issue_executive_owner:
+        df = df[df["issue_executive_owner"].fillna("").str.contains(issue_executive_owner, case=False, na=False)]
+
+    if issue_project_owner:
+        df = df[df["issue_project_owner"].fillna("").str.contains(issue_project_owner, case=False, na=False)]
+    
+    
+    
     if project_name:
         df = df[df["project_name"].fillna("").str.contains(project_name, case=False, na=False)]
 
