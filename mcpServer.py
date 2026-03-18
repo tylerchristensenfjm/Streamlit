@@ -467,10 +467,6 @@ def list_filter_values() -> dict:
         "sample_project_names": clean_unique(df["project_name"])[:100],
     }
 
-async def openai_apps_challenge(request):
-    if not OPENAI_APPS_CHALLENGE_TOKEN:
-        return PlainTextResponse("Challenge token not configured", status_code=500)
-    return PlainTextResponse(OPENAI_APPS_CHALLENGE_TOKEN)
 
 @mcp.custom_route("/.well-known/openai-apps-challenge", methods=["GET"])
 async def openai_apps_challenge(request):
