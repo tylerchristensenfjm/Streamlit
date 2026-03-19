@@ -98,8 +98,7 @@ def fetch_issues_df() -> pd.DataFrame:
                 "remediation_plan": attr.get("remediation_plan"),
                 "recommendation": attr.get("recommendation"),
                 "issue_url": (
-                    f"activity-centers-api.highbond.com/redirect"
-                    f"?target=issue&subdomain=fjmgt&project_id={project_id}&issue_id={item.get('id')}"
+                    f"https://activity-centers-api.highbond.com/redirect?target=issue&subdomain=fjmgt&project_id={project_id}&issue_id={item.get('id')}"
                 ),
             }
         )
